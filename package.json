@@ -1,0 +1,10 @@
+{
+  "name": "@uncensoredcode/session-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "rm -rf dist && mkdir -p dist && cp -R src/. dist/",
+    "test": "node --test tests/**/*.test.js"
+  }
+}

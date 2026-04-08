@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Generic Session Capture</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+        background: #f4f1e8;
+        color: #1f1a14;
+      }
+
+      body {
+        margin: 0;
+        min-width: 360px;
+        background:
+          radial-gradient(circle at top right, rgba(213, 161, 88, 0.22), transparent 36%),
+          linear-gradient(180deg, #f6f3eb 0%, #eee6d8 100%);
+      }
+
+      main {
+        padding: 14px;
+        display: grid;
+        gap: 12px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 16px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .panel {
+        border: 1px solid rgba(31, 26, 20, 0.16);
+        border-radius: 10px;
+        background: rgba(255, 252, 246, 0.84);
+        padding: 10px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 10px;
+      }
+
+      .label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        opacity: 0.64;
+      }
+
+      .value {
+        font-size: 12px;
+        line-height: 1.45;
+        word-break: break-word;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid rgba(31, 26, 20, 0.18);
+        border-radius: 8px;
+        padding: 10px;
+        background: #fff9ef;
+        color: inherit;
+        font: inherit;
+      }
+
+      #bridge-url {
+        margin-top: 4px;
+      }
+
+      button {
+        border: 1px solid #1f1a14;
+        border-radius: 8px;
+        padding: 9px 10px;
+        background: #fff9ef;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: default;
+        opacity: 0.55;
+      }
+
+      #start-capture {
+        background: #d87b33;
+        color: #fff9ef;
+      }
+
+      .status-key {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .status-detail {
+        white-space: pre-wrap;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .status.error {
+        color: #8e2621;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Generic Session Capture</h1>
+
+      <section class="panel stack">
+        <div>
+          <div class="label">Active Origin</div>
+          <div class="value" id="active-origin">Unknown</div>
+        </div>
+        <label>
+          <div class="label">Bridge URL</div>
+          <input
+            id="bridge-url"
+            type="url"
+            inputmode="url"
+            placeholder="http://127.0.0.1:4318"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </label>
+      </section>
+
+      <section class="actions">
+        <button id="start-capture" type="button">Start Capture</button>
+        <button id="send-to-bridge" type="button">Send to Bridge</button>
+        <button id="copy-to-clipboard" type="button">Copy To Clipboard</button>
+      </section>
+
+      <section class="panel status" id="status-panel">
+        <div class="label">Status</div>
+        <div class="status-key" id="status-key">idle</div>
+        <div class="status-detail" id="status-detail">Open an authenticated app tab, then start capture.</div>
+      </section>
+    </main>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+  </html>

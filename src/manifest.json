@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Generic Session Capture",
+  "version": "0.1.0",
+  "description": "Capture a generic authenticated browser session and the next relevant app request from the active tab.",
+  "action": {
+    "default_title": "Generic Session Capture",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["clipboardWrite", "cookies", "storage", "tabs", "scripting", "webRequest"],
+  "host_permissions": ["http://*/*", "https://*/*"]
+}
