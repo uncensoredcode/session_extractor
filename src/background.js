@@ -15,12 +15,10 @@ import {
 } from "./capture-heuristics.js";
 import { redactSensitiveText } from "./redaction.js";
 
-const DEFAULT_CAPTURE_TIMEOUT_MS = 20000;
 const RESOLVE_SCORE_THRESHOLD = 10;
 const RECENT_REQUEST_TTL_MS = 2 * 60 * 1000;
 const CAPTURE_STATE_STORAGE_KEY = "genericSessionCaptureState";
 const CAPTURE_MAX_AGE_MS = 5 * 60 * 1000;
-const captureJobs = new Map();
 const recentRequestsByTab = new Map();
 let captureState;
 const captureLocks = new Set();
@@ -28,24 +26,6 @@ const captureLocks = new Set();
 installRequestListeners();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === "capture-request-trace") {
-    void captureRequestTrace(message)
-      .then((result) => {
-        sendResponse({
-          ok: true,
-          result
-        });
-      })
-      .catch((error) => {
-        sendResponse({
-          ok: false,
-          error: sanitizeErrorMessage(error)
-        });
-      });
-
-    return true;
-  }
-
   if (message?.type === "start-capture-session") {
     void startCaptureSession(message)
       .then((result) => {
@@ -103,59 +83,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-async function captureRequestTrace(request) {
-  const tabId = Number(request?.tabId);
-  const tabUrl = typeof request?.tabUrl === "string" ? request.tabUrl : "";
-  const timeoutMs =
-    Number(request?.timeoutMs) > 0 ? Number(request.timeoutMs) : DEFAULT_CAPTURE_TIMEOUT_MS;
-
-  if (!Number.isInteger(tabId) || tabId < 0) {
-    throw new Error("Active tab was not available.");
-  }
-
-  if (!tabUrl) {
-    throw new Error("Active tab URL was not available.");
-  }
-
-  const existing = captureJobs.get(tabId);
-  if (existing) {
-    throw new Error("A capture is already running for this tab.");
-  }
-
-  const recentTrace = buildRecentTrace(tabId, tabUrl);
-  if (recentTrace.selectedRequest && recentTrace.selectedRequest.inferred?.score >= RESOLVE_SCORE_THRESHOLD) {
-    return {
-      ...recentTrace,
-      source: "recent-cache"
-    };
-  }
-
-  return await new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      finishCapture(tabId, resolve);
-    }, timeoutMs);
-
-    captureJobs.set(tabId, {
-      tabId,
-      tabUrl,
-      startedAt: Date.now(),
-      requestMap: new Map(),
-      resolve,
-      reject,
-      timeoutId
-    });
-
-    if (request?.reloadTab === true) {
-      chrome.tabs.reload(tabId, () => {
-        if (chrome.runtime.lastError) {
-          cleanupCapture(tabId);
-          reject(new Error(chrome.runtime.lastError.message));
-        }
-      });
-    }
-  });
-}
-
 function installRequestListeners() {
   chrome.webRequest.onBeforeRequest.addListener(
     (details) => {
@@ -164,7 +91,6 @@ function installRequestListeners() {
       candidate.requestBodyText = requestBody.text;
       candidate.requestBodyJson = requestBody.json;
       candidate.requestBodyKeys = requestBody.keys;
-      mirrorCandidateToJob(details.tabId, details, candidate);
       void maybeCompletePendingCapture(details.tabId);
     },
     { urls: ["http://*/*", "https://*/*"] },
@@ -175,7 +101,6 @@ function installRequestListeners() {
     (details) => {
       const candidate = upsertRecentCandidate(details);
       candidate.requestHeaders = normalizeHeaders(details.requestHeaders);
-      mirrorCandidateToJob(details.tabId, details, candidate);
       void maybeCompletePendingCapture(details.tabId);
     },
     { urls: ["http://*/*", "https://*/*"] },
@@ -187,7 +112,6 @@ function installRequestListeners() {
       const candidate = upsertRecentCandidate(details);
       candidate.responseHeaders = normalizeHeaders(details.responseHeaders);
       candidate.statusCode = details.statusCode;
-      mirrorCandidateToJob(details.tabId, details, candidate);
       void maybeCompletePendingCapture(details.tabId);
     },
     { urls: ["http://*/*", "https://*/*"] },
@@ -200,7 +124,6 @@ function installRequestListeners() {
       candidate.completed = true;
       candidate.completedAt = Date.now();
       candidate.statusCode = details.statusCode;
-      mirrorCandidateToJob(details.tabId, details, candidate);
       void maybeCompletePendingCapture(details.tabId);
     },
     { urls: ["http://*/*", "https://*/*"] }
@@ -211,7 +134,6 @@ function installRequestListeners() {
       const candidate = upsertRecentCandidate(details);
       candidate.completed = true;
       candidate.error = details.error;
-      mirrorCandidateToJob(details.tabId, details, candidate);
       void maybeCompletePendingCapture(details.tabId);
     },
     { urls: ["http://*/*", "https://*/*"] }
@@ -249,71 +171,12 @@ function upsertRecentCandidate(details) {
   return getOrCreateCandidate(requestMap, details);
 }
 
-function mirrorCandidateToJob(tabId, details, sourceCandidate) {
-  const job = captureJobs.get(tabId);
-  if (!job || !shouldCapture(job, details.url)) {
-    return;
-  }
-
-  const candidate = getOrCreateCandidate(job.requestMap, details);
-  Object.assign(candidate, structuredClone(sourceCandidate));
-  maybeResolve(job);
-}
-
-function shouldCapture(job, requestUrl) {
-  return isSameSiteRequest(job.tabUrl, requestUrl);
-}
-
-function maybeResolve(job) {
-  const best = pickBestCandidate([...job.requestMap.values()]);
-  if (!best || best.inferred.score < RESOLVE_SCORE_THRESHOLD) {
-    return;
-  }
-
-  if (!isInstallReadyRequest(best) && !best.inferred.usesSse) {
-    return;
-  }
-
-  finishCapture(job.tabId, job.resolve);
-}
-
-function finishCapture(tabId, resolve) {
-  const job = captureJobs.get(tabId);
-  if (!job) {
-    return;
-  }
-
-  const liveTrace = buildTraceFromCandidates(job.tabUrl, [...job.requestMap.values()]);
-  const recentTrace = buildRecentTrace(tabId, job.tabUrl);
-  const selectedRequest = choosePreferredRequest(liveTrace.selectedRequest, recentTrace.selectedRequest);
-  const requests = mergeRequests(liveTrace.requests, recentTrace.requests);
-
-  cleanupCapture(tabId);
-  resolve({
-    capturedAt: new Date().toISOString(),
-    tabUrl: job.tabUrl,
-    source: liveTrace.selectedRequest ? "live-capture" : "recent-cache",
-    selectedRequest,
-    requests
-  });
-}
-
-function cleanupCapture(tabId) {
-  const job = captureJobs.get(tabId);
-  if (!job) {
-    return;
-  }
-
-  clearTimeout(job.timeoutId);
-  captureJobs.delete(tabId);
-}
-
 function sanitizeErrorMessage(error) {
   if (error instanceof Error) {
-    return redactSensitiveText(error.message || "Failed to capture request trace.");
+    return redactSensitiveText(error.message || "Operation failed.");
   }
 
-  return "Failed to capture request trace.";
+  return "Operation failed.";
 }
 
 function getRecentRequestMap(tabId) {
@@ -365,35 +228,6 @@ function buildTraceFromCandidates(tabUrl, candidates) {
     requests,
     selectedRequest: best && best.inferred.score >= RESOLVE_SCORE_THRESHOLD ? best : null
   };
-}
-
-function choosePreferredRequest(primary, fallback) {
-  if (!primary) {
-    return fallback;
-  }
-
-  if (!fallback) {
-    return primary;
-  }
-
-  return primary.inferred?.score >= fallback.inferred?.score ? primary : fallback;
-}
-
-function mergeRequests(primary, secondary) {
-  const deduped = new Map();
-
-  for (const request of [...primary, ...secondary]) {
-    if (!request?.requestId) {
-      continue;
-    }
-
-    const existing = deduped.get(request.requestId);
-    if (!existing || (request.inferred?.score ?? 0) >= (existing.inferred?.score ?? 0)) {
-      deduped.set(request.requestId, request);
-    }
-  }
-
-  return [...deduped.values()].sort((left, right) => left.startedAt - right.startedAt);
 }
 
 async function startCaptureSession(request) {

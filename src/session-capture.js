@@ -1,6 +1,4 @@
-import { getSiteHostnames, isCapturablePageUrl, isInstallReadyCandidate } from "./capture-heuristics.js";
-
-const DEFAULT_TRACE_TIMEOUT_MS = 20000;
+import { getSiteHostnames, isCapturablePageUrl } from "./capture-heuristics.js";
 
 export async function detectActiveTarget(chromeApi) {
   const [tab] = await chromeApi.tabs.query({ active: true, currentWindow: true });
@@ -15,66 +13,6 @@ export async function detectActiveTarget(chromeApi) {
     hostname: url.hostname,
     title: tab.title || ""
   };
-}
-
-export async function captureSessionBundle({
-  chromeApi,
-  clock = () => new Date().toISOString(),
-  runtimeCapture,
-  onProgress
-}) {
-  const activeTarget = await requireActiveTarget(chromeApi);
-  onProgress?.(`Reading browser state from ${activeTarget.hostname}...`);
-
-  const pageData = await capturePageDataFromTab({
-    chromeApi,
-    tabId: activeTarget.tab.id
-  });
-
-  onProgress?.(`Watching the next relevant request from ${activeTarget.hostname}...`);
-
-  const requestTrace = await runtimeCapture.captureRequestTrace({
-    tabId: activeTarget.tab.id,
-    tabUrl: activeTarget.tab.url,
-    timeoutMs: DEFAULT_TRACE_TIMEOUT_MS
-  });
-
-  if (!isInstallReadyCandidate(requestTrace?.selectedRequest)) {
-    throw new Error(
-      `No install-ready request was found for ${activeTarget.hostname}. Send a real chat message first, then capture again.`
-    );
-  }
-
-  onProgress?.(`Collecting cookies for ${activeTarget.hostname}...`);
-
-  const cookies = await captureCookiesForPage(chromeApi, activeTarget.tab.url);
-  if (!hasUsableSessionMaterial({
-    cookies,
-    selectedHeaders: requestTrace?.selectedRequest?.requestHeaders
-  })) {
-    throw new Error(`No cookies were found for ${activeTarget.hostname}. Sign in first, then try again.`);
-  }
-
-  return {
-    target: activeTarget,
-    bundle: buildSessionBundle({
-      activeTarget,
-      requestTrace,
-      pageData,
-      cookies,
-      clock,
-      extensionVersion: runtimeCapture.getExtensionVersion()
-    })
-  };
-}
-
-async function requireActiveTarget(chromeApi) {
-  const target = await detectActiveTarget(chromeApi);
-  if (!target) {
-    throw new Error("Open an authenticated http(s) app tab first.");
-  }
-
-  return target;
 }
 
 export async function captureCookiesForPage(chromeApi, pageUrl) {

@@ -56,11 +56,6 @@ async function init() {
 async function startCapture() {
   await withBusy(async () => {
     const target = await requireActiveTarget();
-    const granted = await requestOriginPermission(target.origin);
-    if (!granted) {
-      throw new Error(`Access was not granted for ${target.origin}.`);
-    }
-
     const response = await chrome.runtime.sendMessage({
       type: "start-capture-session",
       tabId: target.tab.id,
@@ -190,22 +185,6 @@ async function readBridgeError(response) {
   } catch {
     return `Bridge request failed with status ${response.status}.`;
   }
-}
-
-async function requestOriginPermission(origin) {
-  if (!origin) {
-    return false;
-  }
-
-  const permissions = {
-    origins: [`${origin}/*`]
-  };
-  const existing = await chrome.permissions.contains(permissions);
-  if (existing) {
-    return true;
-  }
-
-  return chrome.permissions.request(permissions);
 }
 
 async function getCaptureSessionState() {
