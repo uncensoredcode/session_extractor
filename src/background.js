@@ -13,6 +13,7 @@ import {
   normalizeHeaders,
   pickBestCandidate
 } from "./capture-heuristics.js";
+import { hydrateCaptureSessionStateFromStorage, normalizeCaptureSessionState } from "./capture-state.js";
 import { redactSensitiveText } from "./redaction.js";
 
 const RESOLVE_SCORE_THRESHOLD = 10;
@@ -364,7 +365,16 @@ async function getCaptureSessionState() {
   }
 
   const stored = await chrome.storage.local.get(CAPTURE_STATE_STORAGE_KEY);
-  captureState = normalizeCaptureSessionState(stored?.[CAPTURE_STATE_STORAGE_KEY]);
+  const storedState = normalizeCaptureSessionState(stored?.[CAPTURE_STATE_STORAGE_KEY]);
+  captureState = hydrateCaptureSessionStateFromStorage(storedState);
+  if (captureState) {
+    await chrome.storage.local.set({
+      [CAPTURE_STATE_STORAGE_KEY]: captureState
+    });
+    await clearActionBadge(storedState?.tabId);
+    await syncActionBadge(captureState);
+  }
+
   return captureState;
 }
 
@@ -401,24 +411,6 @@ function isInstallReadyRequest(selectedRequest) {
   );
 }
 
-function normalizeCaptureSessionState(value) {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  return {
-    phase: typeof value.phase === "string" ? value.phase : "idle",
-    isError: value.isError === true,
-    tabId: Number.isInteger(value.tabId) ? value.tabId : -1,
-    tabUrl: typeof value.tabUrl === "string" ? value.tabUrl : "",
-    origin: typeof value.origin === "string" ? value.origin : "",
-    title: typeof value.title === "string" ? value.title : "",
-    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
-    message: typeof value.message === "string" ? value.message : "",
-    capturedPackage: isPlainObject(value.capturedPackage) ? value.capturedPackage : null
-  };
-}
-
 async function syncActionBadge(state) {
   const tabId = state?.tabId;
   if (!Number.isInteger(tabId) || tabId < 0) {
@@ -438,6 +430,21 @@ async function syncActionBadge(state) {
     await chrome.action.setBadgeTextColor({
       tabId,
       color: "#ffffff"
+    });
+  } catch {
+    // Ignore badge failures; they are only visual feedback.
+  }
+}
+
+async function clearActionBadge(tabId) {
+  if (!Number.isInteger(tabId) || tabId < 0) {
+    return;
+  }
+
+  try {
+    await chrome.action.setBadgeText({
+      tabId,
+      text: ""
     });
   } catch {
     // Ignore badge failures; they are only visual feedback.
@@ -478,8 +485,4 @@ function safeHostname(origin) {
   } catch {
     return "";
   }
-}
-
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
