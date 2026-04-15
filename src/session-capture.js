@@ -1,5 +1,32 @@
 import { getSiteHostnames, isCapturablePageUrl } from "./capture-heuristics.js";
 
+const KNOWN_PROVIDER_MODEL_CATALOGS = [
+  {
+    hosts: ["chat.qwen.ai"],
+    models: [
+      "qwen3.6-plus",
+      "qwen3.5-plus",
+      "qwen3.5-omni-plus",
+      "qwen3.5-flash",
+      "qwen3.5-max-2026-03-08",
+      "qwen3.6-plus-preview",
+      "qwen3-max-2026-01-23"
+    ]
+  },
+  {
+    hosts: ["chat.deepseek.com"],
+    models: ["instant", "thinking"]
+  },
+  {
+    hosts: ["chat.z.ai"],
+    models: ["glm-4.7", "GLM-5.1", "GLM-5-Turbo", "GLM-5v-Turbo"]
+  },
+  {
+    hosts: ["kimi.com"],
+    models: ["Kimi2.5 instant", "Kimi2.5 thinking"]
+  }
+];
+
 export async function detectActiveTarget(chromeApi) {
   const [tab] = await chromeApi.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || !tab.url || !isCapturablePageUrl(tab.url)) {
@@ -75,6 +102,7 @@ export function buildSessionBundle({
 }) {
   const selectedRequest = requestTrace?.selectedRequest ?? null;
   const selectedHeaders = sanitizeSelectedHeaders(selectedRequest?.requestHeaders);
+  const providerModelCatalog = resolveProviderModelCatalog(activeTarget.origin);
 
   return {
     schemaVersion: 1,
@@ -86,13 +114,15 @@ export function buildSessionBundle({
     sessionStorage: pageData.sessionStorage,
     headers: selectedHeaders,
     integration: {
-      label: pageData.title || activeTarget.title || activeTarget.hostname
+      label: pageData.title || activeTarget.title || activeTarget.hostname,
+      ...(providerModelCatalog ? { models: providerModelCatalog.models } : {})
     },
     metadata: {
       browser: detectBrowserName(pageData.userAgent),
       extensionVersion,
       tabTitle: pageData.title || activeTarget.title || "",
       captureMode: "next-request",
+      ...(providerModelCatalog ? { availableModels: providerModelCatalog.models } : {}),
       selectedRequest: selectedRequest
         ? {
             url: selectedRequest.url,
@@ -107,6 +137,23 @@ export function buildSessionBundle({
       requestCapture: requestTrace
     }
   };
+}
+
+function resolveProviderModelCatalog(origin) {
+  const hostname = safeOriginHostname(origin);
+  if (!hostname) {
+    return null;
+  }
+
+  for (const catalog of KNOWN_PROVIDER_MODEL_CATALOGS) {
+    if (catalog.hosts.some((candidate) => hostname === candidate || hostname.endsWith(`.${candidate}`))) {
+      return {
+        models: [...catalog.models]
+      };
+    }
+  }
+
+  return null;
 }
 
 export function buildBridgeInstallBundle(bundle) {
@@ -268,6 +315,14 @@ function detectBrowserName(userAgent) {
   }
 
   return "Unknown";
+}
+
+function safeOriginHostname(origin) {
+  try {
+    return new URL(origin).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
 }
 
 function readPageDataFromPage() {

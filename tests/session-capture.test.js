@@ -43,6 +43,82 @@ test("session bundle does not turn captured model hints into integration models"
   assert.deepEqual(bundle.metadata.selectedRequest.modelHints, ["model-alpha"]);
 });
 
+test("session bundle adds explicit provider model catalogs for known web chats", () => {
+  const cases = [
+    {
+      origin: "https://chat.qwen.ai",
+      hostname: "chat.qwen.ai",
+      title: "Qwen",
+      expectedModels: [
+        "qwen3.6-plus",
+        "qwen3.5-plus",
+        "qwen3.5-omni-plus",
+        "qwen3.5-flash",
+        "qwen3.5-max-2026-03-08",
+        "qwen3.6-plus-preview",
+        "qwen3-max-2026-01-23"
+      ]
+    },
+    {
+      origin: "https://chat.deepseek.com",
+      hostname: "chat.deepseek.com",
+      title: "DeepSeek",
+      expectedModels: ["instant", "thinking"]
+    },
+    {
+      origin: "https://chat.z.ai",
+      hostname: "chat.z.ai",
+      title: "z.ai",
+      expectedModels: ["glm-4.7", "GLM-5.1", "GLM-5-Turbo", "GLM-5v-Turbo"]
+    },
+    {
+      origin: "https://www.kimi.com",
+      hostname: "www.kimi.com",
+      title: "Kimi",
+      expectedModels: ["Kimi2.5 instant", "Kimi2.5 thinking"]
+    }
+  ];
+
+  for (const testCase of cases) {
+    const bundle = buildSessionBundle({
+      activeTarget: {
+        origin: testCase.origin,
+        hostname: testCase.hostname,
+        title: testCase.title
+      },
+      requestTrace: {
+        selectedRequest: {
+          url: `${testCase.origin}/api/chat/completions`,
+          method: "POST",
+          type: "fetch",
+          requestHeaders: {
+            Authorization: "Bearer token"
+          },
+          inferred: {
+            score: 20,
+            modelHints: [testCase.expectedModels[0]],
+            responseContentType: "text/event-stream",
+            usesSse: true
+          }
+        },
+        requests: []
+      },
+      pageData: {
+        localStorage: {},
+        sessionStorage: {},
+        title: testCase.title,
+        userAgent: "Mozilla/5.0 Chrome/146.0.0.0"
+      },
+      cookies: [{ name: "session", value: "cookie" }],
+      clock: () => "2026-04-15T10:00:00.000Z",
+      extensionVersion: "0.1.0"
+    });
+
+    assert.deepEqual(bundle.integration.models, testCase.expectedModels, testCase.origin);
+    assert.deepEqual(bundle.metadata.availableModels, testCase.expectedModels, testCase.origin);
+  }
+});
+
 test("header-auth captures are considered usable without cookies", () => {
   assert.equal(
     hasUsableSessionMaterial({
