@@ -23,7 +23,7 @@ const KNOWN_PROVIDER_MODEL_CATALOGS = [
   },
   {
     hosts: ["kimi.com"],
-    models: ["Kimi2.5 instant", "Kimi2.5 thinking"]
+    models: ["Kimi2.5 instant", "Kimi2.5 thinking", "Kimi2.6 instant", "Kimi2.6 thinking"]
   }
 ];
 
